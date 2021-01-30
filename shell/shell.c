@@ -11,8 +11,7 @@
 
 int main(){
 	char ch;
-//        char arg[MAX_ARGS][SIZE];
-	char *arg[MAX_ARGS] = {"ls", "-a", NULL};
+	char *arg[MAX_ARGS];
 	char cmd[SIZE];
 	char *token;
 	int pid;
@@ -46,9 +45,9 @@ int main(){
 			printf("%s\n", arg[i]);
 		}
 		
-
 		// Make copy of process
 		pid = fork();
+		
 		// Child process
 		if(pid == 0){
 			if(execvp(arg[0], arg) == -1){
