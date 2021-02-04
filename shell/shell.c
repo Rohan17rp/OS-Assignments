@@ -5,42 +5,64 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_ARGS 5 
+#define MAX_ARGS 10 
 #define SIZE 128
 
 void get_command(char*);
-int tokenize_command(char**, char*);
-void print_args(char** arg, int arg_count);
+int tokenize_command(char**, char*, char*);
+void print_args(char**, int);
 
 int main(){
 	char *arg[MAX_ARGS];
+	char *argpipe[MAX_ARGS];
 	char cmd[SIZE];
-	int pid;
+	int opid, npid, pfd[2];
 	while(1){
-		int arg_count = 0, i;
+		int arg_count = 0, i = 0, arg_pipe_count = 0;
 		printf("potato-prompt-->");
 	
-		// Get user input	
-		get_command(cmd);
-		
-		arg_count = tokenize_command(arg, cmd);	
+		// Get user input and tokenize	
+		get_command(cmd);	
+		arg_pipe_count = tokenize_command(argpipe, cmd, "|");
 
-		// Printing arguments for debugging
-		// print_args(arg, arg_count);
-
-		// Make copy of process
-		pid = fork();
-		
-		// Child process
-		if(pid == 0){
-			if(execvp(arg[0], arg) == -1){
-				exit(0);
+		if (arg_pipe_count == 1){
+			arg_count = tokenize_command(arg, argpipe[i], " "); 	
+			opid = fork();
+			if(opid == 0){
+				if(execvp(arg[0], arg) == -1){
+					exit(0);
+				}
+			}
+			else{
+				wait(NULL);
 			}
 		}
-		// Parent process
-		else{
-			wait(0);
+		else if (arg_pipe_count == 2){	
+			pipe(pfd);
+			opid = fork();
+			if(opid == 0){
+				close(1);
+				dup(pfd[1]);
+				arg_count = tokenize_command(arg, argpipe[0], " "); 
+				execvp(arg[0], arg);
+			}
+			else{
+				npid = fork();
+				if(npid == 0){
+					close(0);
+					dup(pfd[0]);
+					arg_count = tokenize_command(arg, argpipe[1], " ");
+					execvp(arg[0], arg);
+				}
+				else{
+					wait(NULL);
+				}
+			}
 		}
+		else {
+			printf("Too many pipes, Can't be processed\n");
+		}
+
 	}
 }
 
@@ -64,22 +86,28 @@ void get_command(char* cmd){
 }
 
 /*
- * Breaks string by spaces and saves strings in new array
+ * Breaks string by delimiter and saves strings in new array
  * Returns number of strings formed
  * */
-int tokenize_command(char** arg, char* cmd){
-	char *token;
-	int i = 0;
-	token = strtok(cmd, " ");
-	while(token != NULL){
-		arg[i] = token;
-		i++;
-		token = strtok(NULL, " ");
+int tokenize_command(char** argument, char* command, char* delimiter){
+	char *str, *token;
+	char *saveptr;
+	int i;
+	for (i = 0, str = command; ; i++, str = NULL) {
+		token = strtok_r(str, delimiter, &saveptr);
+		if (token == NULL){
+			break;
+		}
+		argument[i] = token;
+		//printf("%d: %s\n", i, token);
 	}
-	arg[i] = NULL;
+	argument[i] = NULL;
 	return i;
 }
 
+/*
+ * Prints each string in array on new line
+ * */
 void print_args(char** arg, int arg_count){
 	int i =0;
 	for(i = 0; i < arg_count; i++){
