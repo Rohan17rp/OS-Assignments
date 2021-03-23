@@ -4,13 +4,20 @@
 #include <sys/wait.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
 
 #define MAX_ARGS 10 
 #define SIZE 128
 
+char* remove_spaces(char *string);
+
 void get_command(char*);
 int tokenize_command(char**, char*, char*);
 void print_args(char**, int);
+void pipeexec(int* pfd,char** arg, char** argpipe, int, int);
+void cmdexec(char** arg, char** argpipe, int opid);
+
+void pipeexec2(int* pfd, char** arg, char** argpipe, int opid, int npid, int arg_pipe_count);
 
 int main(){
 	char *arg[MAX_ARGS];
@@ -21,46 +28,44 @@ int main(){
 		int arg_count = 0, i = 0, arg_pipe_count = 0;
 		printf("potato-prompt-->");
 	
-		// Get user input and tokenize	
 		get_command(cmd);	
 		arg_pipe_count = tokenize_command(argpipe, cmd, "|");
 
 		if (arg_pipe_count == 1){
-			arg_count = tokenize_command(arg, argpipe[i], " "); 	
-			opid = fork();
-			if(opid == 0){
-				if(execvp(arg[0], arg) == -1){
-					exit(0);
-				}
-			}
-			else{
-				wait(NULL);
-			}
+	//		int input_redirection = 0;
+	//		int output_redirection = 0;
+	//		int fd;
+	//		
+	//		input_redirection = tokenize_command(arg, argpipe[0], "<");
+	//		//printf("\n%d input redirections\n", input_redirection - 1);
+	//		if(input_redirection == 2){
+	//			char* file_name = remove_spaces(arg[1]);
+	//			fd = open(file_name, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+	//			dup2(fd, 0);
+	//			close(fd);
+	//		}
+	//		else if (input_redirection > 2){
+	//			printf("Too many input redirections\n");
+	//		}
+	//		output_redirection = tokenize_command(arg, argpipe[0], ">");
+	//		//printf("%d output redirections\n", output_redirection - 1);
+	//		if(output_redirection == 2){
+	//			char* file_name = remove_spaces(arg[1]);
+	//			fd = open(file_name, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+	//			dup2(fd, 1);
+	//			close(fd);
+	//		}
+	//		else if (output_redirection > 2){
+	//			printf("Too many output redirections\n");
+	//		}
+	//		close(fd);
+			cmdexec(arg, argpipe, opid);
 		}
 		else if (arg_pipe_count == 2){	
-			pipe(pfd);
-			opid = fork();
-			if(opid == 0){
-				close(1);
-				dup(pfd[1]);
-				arg_count = tokenize_command(arg, argpipe[0], " "); 
-				execvp(arg[0], arg);
-			}
-			else{
-				npid = fork();
-				if(npid == 0){
-					close(0);
-					dup(pfd[0]);
-					arg_count = tokenize_command(arg, argpipe[1], " ");
-					execvp(arg[0], arg);
-				}
-				else{
-					wait(NULL);
-				}
-			}
+			pipeexec(pfd, arg, argpipe, opid, npid);
 		}
 		else {
-			printf("Too many pipes, Can't be processed\n");
+			pipeexec2(pfd, arg, argpipe, opid, npid, arg_pipe_count);
 		}
 
 	}
@@ -114,3 +119,110 @@ void print_args(char** arg, int arg_count){
 		printf("%s\n", arg[i]);
 	}
 }
+
+void cmdexec(char** arg, char** argpipe, int opid){
+	int input_redirection = 0;
+	int output_redirection = 0;
+	int fd;
+	opid = fork();
+	if(opid == 0){	
+		output_redirection = tokenize_command(arg, argpipe[0], ">");
+		//printf("%d output redirections\n", output_redirection - 1);
+		if(output_redirection == 2){
+			char* file_name = remove_spaces(arg[1]);
+			fd = open(file_name, O_CREAT | O_TRUNC | O_WRONLY, S_IRUSR | S_IWUSR);
+			dup2(fd, 1);
+			close(fd);
+		}
+		else if (output_redirection > 2){
+			printf("Too many output redirections\n");
+		}
+		
+		input_redirection = tokenize_command(arg, argpipe[0], "<");
+		//printf("\n%d input redirections\n", input_redirection - 1);
+		if(input_redirection == 2){
+			char* file_name = remove_spaces(arg[1]);
+			fd = open(file_name, O_CREAT | O_RDONLY, S_IRUSR | S_IWUSR);
+			dup2(fd, 0);
+			close(fd);
+		}
+		else if (input_redirection > 2){
+			printf("Too many input redirections\n");
+		}
+
+		tokenize_command(arg, argpipe[0], " "); 	
+
+		if(execvp(arg[0], arg) == -1){
+			printf("Exec Failed");
+			exit(0);
+		}
+	}
+	else{
+		wait(NULL);
+	}
+}
+
+void pipeexec(int* pfd, char** arg, char** argpipe, int opid, int npid){
+	pipe(pfd);
+	opid = fork();
+	if(opid == 0){
+		close(1);
+		dup(pfd[1]);
+		tokenize_command(arg, argpipe[0], " "); 
+		execvp(arg[0], arg);
+	}
+	else{
+		npid = fork();
+		if(npid == 0){
+			close(0);
+			dup(pfd[0]);
+			tokenize_command(arg, argpipe[1], " ");
+			execvp(arg[0], arg);
+		}
+		else{
+			wait(0);
+		}
+	}
+}
+
+void pipeexec2(int* pfd, char** arg, char** argpipe, int opid, int npid, int arg_pipe_count){
+	pipe(pfd);
+//	opid = fork();
+	int i = 0;	
+	for(i = 0; i < arg_pipe_count; i++){
+		npid = fork();
+		if(npid == 0){
+			if(i != 0){
+				close(0);
+				dup(pfd[0]);
+			}
+			if(i != arg_pipe_count - 1){
+				close(1);
+				dup(pfd[1]);
+			}
+			tokenize_command(arg, argpipe[i], " ");
+			execvp(arg[0], arg);
+		}
+	}
+}
+
+char* remove_spaces(char *string){
+	int size = strlen(string);
+	char* file_name = malloc(sizeof(char) * size);
+	int count = 0;
+	int i;
+	for(i = 0; i < size; i++){
+		if(string[i] == '\0'){
+			break;
+		}
+		if(string[i] != ' '){
+			file_name[count] = string[i];
+			count++;
+		}
+	}
+	if(file_name[count - 1] != '\0'){
+		file_name[count] = '\0';
+	}
+	return file_name;
+}
+
